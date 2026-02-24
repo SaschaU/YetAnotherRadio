@@ -19,19 +19,25 @@ const MPRIS_PLAYER_XML = `<node>
         <method name="Pause"/>
         <method name="PlayPause"/>
         <method name="Stop"/>
+        <method name="Next"/>
+        <method name="Previous"/>
         <property name="PlaybackStatus" type="s" access="read"/>
         <property name="Metadata" type="a{sv}" access="read"/>
         <property name="Volume" type="d" access="readwrite"/>
         <property name="CanPlay" type="b" access="read"/>
         <property name="CanPause" type="b" access="read"/>
         <property name="CanControl" type="b" access="read"/>
+        <property name="CanGoNext" type="b" access="read"/>
+        <property name="CanGoPrevious" type="b" access="read"/>
     </interface>
 </node>`;
 
 export default class MprisInterface {
-    constructor(playbackManager, settings) {
+    constructor(playbackManager, settings, navigateCallback) {
         this._playbackManager = playbackManager;
         this._settings = settings;
+        this._navigateCallback = navigateCallback ?? null;
+        this._stationCount = 0;
         this._dbusConnection = null;
         this._rootExported = null;
         this._playerExported = null;
@@ -48,7 +54,7 @@ export default class MprisInterface {
 
         this._onState = () => this._emitPlayerPropertiesChanged(['PlaybackStatus', 'CanPlay', 'CanPause']);
         this._onMeta = () => this._emitPlayerPropertiesChanged(['Metadata']);
-        this._onStation = () => this._emitPlayerPropertiesChanged(['Metadata', 'CanPlay', 'CanPause']);
+        this._onStation = () => this._emitPlayerPropertiesChanged(['Metadata', 'CanPlay', 'CanPause', 'CanGoNext', 'CanGoPrevious']);
 
         this._playbackManager.addListener('onStateChanged', this._onState);
         this._playbackManager.addListener('onMetadataUpdate', this._onMeta);
@@ -86,6 +92,8 @@ export default class MprisInterface {
                     Pause() { const m = self._playbackManager; if (m?.playbackState === 'playing') m.toggle(); },
                     PlayPause() { self._playbackManager?.toggle(); },
                     Stop() { self._playbackManager?.stop(); },
+                    Next() { self._navigateCallback?.(+1); },
+                    Previous() { self._navigateCallback?.(-1); },
                     get PlaybackStatus() { return self._getPlaybackStatus(); },
                     get Metadata() { return self._getMetadata(); },
                     get Volume() { return self._getVolume(); },
@@ -97,6 +105,8 @@ export default class MprisInterface {
                     get CanPlay() { return !!self._playbackManager?.nowPlaying; },
                     get CanPause() { return !!self._playbackManager?.nowPlaying && self._getPlaybackStatus() !== 'Stopped'; },
                     get CanControl() { return true; },
+                    get CanGoNext() { return self._canNavigate(); },
+                    get CanGoPrevious() { return self._canNavigate(); },
                 }
             );
 
@@ -153,6 +163,16 @@ export default class MprisInterface {
         return Math.max(0.0, Math.min(1.0, this._settings.get_int('volume') / 100.0));
     }
 
+    _canNavigate() {
+        if (!this._playbackManager?.nowPlaying) return false;
+        return this._stationCount > 1;
+    }
+
+    setStationCount(count) {
+        this._stationCount = count;
+        this._emitPlayerPropertiesChanged(['CanGoNext', 'CanGoPrevious']);
+    }
+
     _emitPropertiesChanged(interfaceName, changedProps) {
         if (!this._dbusConnection) return;
 
@@ -180,6 +200,8 @@ export default class MprisInterface {
             Volume: () => new GLib.Variant('d', this._getVolume()),
             CanPlay: () => new GLib.Variant('b', !!this._playbackManager?.nowPlaying),
             CanPause: () => new GLib.Variant('b', !!this._playbackManager?.nowPlaying && this._getPlaybackStatus() !== 'Stopped'),
+            CanGoNext: () => new GLib.Variant('b', this._canNavigate()),
+            CanGoPrevious: () => new GLib.Variant('b', this._canNavigate()),
         };
 
         const changed = {};

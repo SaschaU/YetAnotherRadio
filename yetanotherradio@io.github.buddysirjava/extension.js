@@ -16,12 +16,13 @@ import MprisInterface from './modules/mprisInterface.js';
 
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
-        _init(stations, openPrefs, extensionPath, settings) {
+        _init(stations, openPrefs, extensionPath, settings, onStationsChanged) {
             super._init(0.0, _('Yet Another Radio'));
 
             this._stations = stations ?? [];
             this._openPrefs = openPrefs;
             this._settings = settings;
+            this._onStationsChanged = onStationsChanged;
             this._refreshIdleId = 0;
 
             const iconPath = `${extensionPath}/icons/yetanotherradio.svg`;
@@ -125,6 +126,7 @@ const Indicator = GObject.registerClass(
         setStations(stations) {
             this._stations = stations ?? [];
             this._refreshStationsMenu();
+            this._onStationsChanged?.(this._stations.length);
         }
 
         _refreshStationsMenu() {
@@ -168,6 +170,26 @@ const Indicator = GObject.registerClass(
             this._playbackManager.stop();
         }
 
+        _orderedStations() {
+            const favorites = this._stations
+                .filter(s => s.favorite)
+                .sort((a, b) => a.name.localeCompare(b.name));
+            const regulars = this._stations.filter(s => !s.favorite);
+            return [...favorites, ...regulars];
+        }
+
+        navigateStation(delta) {
+            if (!this._playbackManager.nowPlaying) return;
+            const ordered = this._orderedStations();
+            if (ordered.length <= 1) return;
+            const currentIdx = ordered.findIndex(
+                s => s.uuid === this._playbackManager.nowPlaying.uuid
+            );
+            if (currentIdx === -1) return;
+            const nextIdx = (currentIdx + delta + ordered.length) % ordered.length;
+            this._playStation(ordered[nextIdx]);
+        }
+
         destroy() {
             this._playbackManager.destroy();
 
@@ -193,11 +215,22 @@ export default class YetAnotherRadioExtension extends Extension {
         initTranslations(_);
         ensureStorageFile();
         this._settings = this.getSettings();
-        this._indicator = new Indicator([], () => this.openPreferences(), this.path, this._settings);
+        this._indicator = new Indicator(
+            [],
+            () => this.openPreferences(),
+            this.path,
+            this._settings,
+            (count) => this._mpris?.setStationCount(count)
+        );
 
         if (this._settings.get_boolean('enable-mpris')) {
             try {
-                this._mpris = new MprisInterface(this._indicator._playbackManager, this._settings);
+                this._mpris = new MprisInterface(
+                    this._indicator._playbackManager,
+                    this._settings,
+                    (delta) => this._indicator.navigateStation(delta)
+                );
+                this._mpris.setStationCount(this._indicator._stations.length);
             } catch (error) {
                 console.warn('Failed to initialize MPRIS interface:', error);
             }
@@ -208,7 +241,12 @@ export default class YetAnotherRadioExtension extends Extension {
             if (this._settings.get_boolean('enable-mpris')) {
                 if (!this._mpris) {
                     try {
-                        this._mpris = new MprisInterface(this._indicator._playbackManager, this._settings);
+                        this._mpris = new MprisInterface(
+                            this._indicator._playbackManager,
+                            this._settings,
+                            (delta) => this._indicator.navigateStation(delta)
+                        );
+                        this._mpris.setStationCount(this._indicator._stations.length);
                     } catch (error) {
                         console.warn('Failed to initialize MPRIS interface:', error);
                     }
