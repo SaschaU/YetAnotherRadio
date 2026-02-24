@@ -228,7 +228,8 @@ export default class YetAnotherRadioExtension extends Extension {
                 this._mpris = new MprisInterface(
                     this._indicator._playbackManager,
                     this._settings,
-                    (delta) => this._indicator.navigateStation(delta)
+                    (delta) => this._indicator.navigateStation(delta),
+                    () => this._indicator._stations.slice().sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))[0] ?? null
                 );
                 this._mpris.setStationCount(this._indicator._stations.length);
             } catch (error) {
@@ -244,7 +245,8 @@ export default class YetAnotherRadioExtension extends Extension {
                         this._mpris = new MprisInterface(
                             this._indicator._playbackManager,
                             this._settings,
-                            (delta) => this._indicator.navigateStation(delta)
+                            (delta) => this._indicator.navigateStation(delta),
+                            () => this._indicator._stations.slice().sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))[0] ?? null
                         );
                         this._mpris.setStationCount(this._indicator._stations.length);
                     } catch (error) {

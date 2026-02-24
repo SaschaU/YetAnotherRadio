@@ -33,10 +33,11 @@ const MPRIS_PLAYER_XML = `<node>
 </node>`;
 
 export default class MprisInterface {
-    constructor(playbackManager, settings, navigateCallback) {
+    constructor(playbackManager, settings, navigateCallback, lastStationCallback) {
         this._playbackManager = playbackManager;
         this._settings = settings;
         this._navigateCallback = navigateCallback ?? null;
+        this._lastStationCallback = lastStationCallback ?? null;
         this._stationCount = 0;
         this._dbusConnection = null;
         this._rootExported = null;
@@ -88,9 +89,23 @@ export default class MprisInterface {
             this._playerExported = Gio.DBusExportedObject.wrapJSObject(
                 MPRIS_PLAYER_XML,
                 {
-                    Play() { const m = self._playbackManager; if (m?.nowPlaying) m.play(m.nowPlaying); },
+                    Play() {
+                        const m = self._playbackManager;
+                        if (!m) return;
+                        const target = m.nowPlaying ?? self._lastStationCallback?.();
+                        if (target) m.play(target);
+                    },
                     Pause() { const m = self._playbackManager; if (m?.playbackState === 'playing') m.toggle(); },
-                    PlayPause() { self._playbackManager?.toggle(); },
+                    PlayPause() {
+                        const m = self._playbackManager;
+                        if (!m) return;
+                        if (m.playbackState === 'stopped') {
+                            const target = m.nowPlaying ?? self._lastStationCallback?.();
+                            if (target) m.play(target);
+                        } else {
+                            m.toggle();
+                        }
+                    },
                     Stop() { self._playbackManager?.stop(); },
                     Next() { self._navigateCallback?.(+1); },
                     Previous() { self._navigateCallback?.(-1); },
