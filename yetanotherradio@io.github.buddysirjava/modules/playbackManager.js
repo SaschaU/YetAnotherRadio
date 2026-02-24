@@ -85,6 +85,14 @@ export default class PlaybackManager {
             metadata['xesam:artist'] = new GLib.Variant('as', [this._currentMetadata.artist]);
         }
 
+        let artUrl = this._currentMetadata.albumArt || this._nowPlaying?.favicon || null;
+        if (artUrl) {
+            if (artUrl.startsWith('/')) {
+                artUrl = 'file://' + artUrl;
+            }
+            metadata['mpris:artUrl'] = new GLib.Variant('s', artUrl);
+        }
+
         return metadata;
     }
 
