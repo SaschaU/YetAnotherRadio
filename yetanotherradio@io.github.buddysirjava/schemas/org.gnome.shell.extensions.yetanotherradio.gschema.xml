@@ -27,17 +27,16 @@
       <summary>Auto-play last station</summary>
       <description>Automatically play the last played station when the extension is enabled</description>
     </key>
-    
-    <key name="enable-media-keys" type="b">
-      <default>true</default>
-      <summary>Enable media keys</summary>
-      <description>Enable global keyboard media keys (Play/Pause, Stop) to control playback</description>
-    </key>
-    
     <key name="show-playing-notification" type="b">
       <default>true</default>
       <summary>Show playing notification</summary>
       <description>Show an on-screen notification when starting radio playback</description>
+    </key>
+
+    <key name="enable-mpris" type="b">
+      <default>true</default>
+      <summary>Enable MPRIS integration</summary>
+      <description>Expose the player over D-Bus via the MPRIS2 protocol</description>
     </key>
     
     <key name="volume" type="i">

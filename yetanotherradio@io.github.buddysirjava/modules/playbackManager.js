@@ -16,6 +16,7 @@ export default class PlaybackManager {
     constructor(settings, callbacks, osdIcon = null) {
         this._settings = settings;
         this._callbacks = callbacks || {};
+        this._listeners = {};
         this._osdIcon = osdIcon;
 
         this._player = null;
@@ -39,6 +40,23 @@ export default class PlaybackManager {
         };
     }
 
+    addListener(event, fn) {
+        (this._listeners[event] ||= []).push(fn);
+    }
+
+    removeListener(event, fn) {
+        const list = this._listeners[event];
+        if (list) {
+            const idx = list.indexOf(fn);
+            if (idx !== -1) list.splice(idx, 1);
+        }
+    }
+
+    _emit(event, ...args) {
+        this._callbacks[event]?.(...args);
+        (this._listeners[event] || []).forEach(fn => fn(...args));
+    }
+
     _initGst() {
         if (!Gst.is_initialized()) {
             Gst.init(null);
@@ -55,6 +73,27 @@ export default class PlaybackManager {
 
     get nowPlaying() {
         return this._nowPlaying;
+    }
+
+    getMPRISMetadata() {
+        const metadata = {};
+
+        if (this._currentMetadata.title) {
+            metadata['xesam:title'] = new GLib.Variant('s', this._currentMetadata.title);
+        }
+        if (this._currentMetadata.artist) {
+            metadata['xesam:artist'] = new GLib.Variant('as', [this._currentMetadata.artist]);
+        }
+
+        let artUrl = this._currentMetadata.albumArt || this._nowPlaying?.favicon || null;
+        if (artUrl) {
+            if (artUrl.startsWith('/')) {
+                artUrl = 'file://' + artUrl;
+            }
+            metadata['mpris:artUrl'] = new GLib.Variant('s', artUrl);
+        }
+
+        return metadata;
     }
 
     _ensurePlayer() {
@@ -88,9 +127,7 @@ export default class PlaybackManager {
                 if (metadata.albumArt) this._currentMetadata.albumArt = metadata.albumArt;
                 if (metadata.bitrate) this._currentMetadata.bitrate = metadata.bitrate;
 
-                if (this._callbacks.onMetadataUpdate) {
-                    this._callbacks.onMetadataUpdate();
-                }
+                this._emit('onMetadataUpdate');
             }
         } else if (message.type === Gst.MessageType.ERROR) {
             const [error, debug] = message.parse_error();
@@ -159,9 +196,9 @@ export default class PlaybackManager {
             this._currentMetadata.nowPlaying = station;
             this._currentMetadata.playbackState = 'playing';
 
-            if (this._callbacks.onStateChanged) this._callbacks.onStateChanged('playing');
-            if (this._callbacks.onStationChanged) this._callbacks.onStationChanged(station);
-            if (this._callbacks.onVisibilityChanged) this._callbacks.onVisibilityChanged(true);
+            this._emit('onStateChanged', 'playing');
+            this._emit('onStationChanged', station);
+            this._emit('onVisibilityChanged', true);
 
             this._startMetadataUpdate();
             
@@ -209,7 +246,7 @@ export default class PlaybackManager {
             this._pausedAt = Date.now();
 
             this._currentMetadata.playbackState = 'paused';
-            if (this._callbacks.onStateChanged) this._callbacks.onStateChanged('paused');
+            this._emit('onStateChanged', 'paused');
 
         } else if (this._playbackState === 'paused') {
             const pauseDuration = this._pausedAt ? Date.now() - this._pausedAt : 0;
@@ -222,7 +259,7 @@ export default class PlaybackManager {
                 this._playbackState = 'playing';
                 this._currentMetadata.playbackState = 'playing';
 
-                if (this._callbacks.onStateChanged) this._callbacks.onStateChanged('playing');
+                this._emit('onStateChanged', 'playing');
             }
             this._pausedAt = null;
         }
@@ -246,9 +283,9 @@ export default class PlaybackManager {
 
         this._stopMetadataUpdate();
 
-        if (this._callbacks.onStateChanged) this._callbacks.onStateChanged('stopped');
-        if (this._callbacks.onStationChanged) this._callbacks.onStationChanged(null);
-        if (this._callbacks.onVisibilityChanged) this._callbacks.onVisibilityChanged(false);
+        this._emit('onStateChanged', 'stopped');
+        this._emit('onStationChanged', null);
+        this._emit('onVisibilityChanged', false);
     }
 
     setVolume(volume) {
@@ -265,9 +302,7 @@ export default class PlaybackManager {
             interval,
             () => {
                 queryPlayerTags(this._player, this._currentMetadata);
-                if (this._callbacks.onMetadataUpdate) {
-                    this._callbacks.onMetadataUpdate();
-                }
+                this._emit('onMetadataUpdate');
                 return true;
             }
         );

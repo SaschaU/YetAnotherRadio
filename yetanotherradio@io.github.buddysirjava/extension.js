@@ -12,16 +12,17 @@ import { createMetadataItem, updateMetadataDisplay, updatePlaybackStateIcon } fr
 import { createVolumeItem, onVolumeChanged } from './modules/volumeControl.js';
 import { createScrollableSection, createStationMenuItem, refreshStationsMenu } from './modules/stationMenu.js';
 import PlaybackManager from './modules/playbackManager.js';
-import { setupMediaKeys, cleanupMediaKeys } from './modules/mediaKeys.js';
+import MprisInterface from './modules/mprisInterface.js';
 
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
-        _init(stations, openPrefs, extensionPath, settings) {
+        _init(stations, openPrefs, extensionPath, settings, onStationsChanged) {
             super._init(0.0, _('Yet Another Radio'));
 
             this._stations = stations ?? [];
             this._openPrefs = openPrefs;
             this._settings = settings;
+            this._onStationsChanged = onStationsChanged;
             this._refreshIdleId = 0;
 
             const iconPath = `${extensionPath}/icons/yetanotherradio.svg`;
@@ -125,6 +126,7 @@ const Indicator = GObject.registerClass(
         setStations(stations) {
             this._stations = stations ?? [];
             this._refreshStationsMenu();
+            this._onStationsChanged?.(this._stations.length);
         }
 
         _refreshStationsMenu() {
@@ -168,12 +170,24 @@ const Indicator = GObject.registerClass(
             this._playbackManager.stop();
         }
 
-        handleMediaPlayPause() {
-            this._togglePlayback();
+        _orderedStations() {
+            const favorites = this._stations
+                .filter(s => s.favorite)
+                .sort((a, b) => a.name.localeCompare(b.name));
+            const regulars = this._stations.filter(s => !s.favorite);
+            return [...favorites, ...regulars];
         }
 
-        handleMediaStop() {
-            this._stopPlayback();
+        navigateStation(delta) {
+            if (!this._playbackManager.nowPlaying) return;
+            const ordered = this._orderedStations();
+            if (ordered.length <= 1) return;
+            const currentIdx = ordered.findIndex(
+                s => s.uuid === this._playbackManager.nowPlaying.uuid
+            );
+            if (currentIdx === -1) return;
+            const nextIdx = (currentIdx + delta + ordered.length) % ordered.length;
+            this._playStation(ordered[nextIdx]);
         }
 
         destroy() {
@@ -201,7 +215,54 @@ export default class YetAnotherRadioExtension extends Extension {
         initTranslations(_);
         ensureStorageFile();
         this._settings = this.getSettings();
-        this._indicator = new Indicator([], () => this.openPreferences(), this.path, this._settings);
+        this._indicator = new Indicator(
+            [],
+            () => this.openPreferences(),
+            this.path,
+            this._settings,
+            (count) => this._mpris?.setStationCount(count)
+        );
+
+        if (this._settings.get_boolean('enable-mpris')) {
+            try {
+                this._mpris = new MprisInterface(
+                    this._indicator._playbackManager,
+                    this._settings,
+                    (delta) => this._indicator.navigateStation(delta),
+                    () => this._indicator._stations.slice().sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))[0] ?? null,
+                    () => this._indicator.menu.open(true)
+                );
+                this._mpris.setStationCount(this._indicator._stations.length);
+            } catch (error) {
+                console.warn('Failed to initialize MPRIS interface:', error);
+            }
+        }
+
+        this._mprisSettingId = 0;
+        this._mprisSettingId = this._settings.connect('changed::enable-mpris', () => {
+            if (this._settings.get_boolean('enable-mpris')) {
+                if (!this._mpris) {
+                    try {
+                        this._mpris = new MprisInterface(
+                            this._indicator._playbackManager,
+                            this._settings,
+                            (delta) => this._indicator.navigateStation(delta),
+                            () => this._indicator._stations.slice().sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))[0] ?? null,
+                            () => this._indicator.menu.open(true)
+                        );
+                        this._mpris.setStationCount(this._indicator._stations.length);
+                    } catch (error) {
+                        console.warn('Failed to initialize MPRIS interface:', error);
+                    }
+                }
+            } else {
+                if (this._mpris) {
+                    this._mpris.destroy();
+                    this._mpris = null;
+                }
+            }
+        });
+
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
         loadStations().then(stations => {
@@ -213,7 +274,6 @@ export default class YetAnotherRadioExtension extends Extension {
         });
 
         this._monitor = this._watchStationsFile();
-        this._setupMediaKeys();
     }
 
     _watchStationsFile() {
@@ -229,24 +289,6 @@ export default class YetAnotherRadioExtension extends Extension {
         return monitor;
     }
 
-    _setupMediaKeys() {
-        const { mediaKeyAccelerators, acceleratorHandlerId, mediaKeysSettingsHandlerId } = setupMediaKeys(this._settings, this._indicator);
-        this._mediaKeyAccelerators = mediaKeyAccelerators;
-        this._acceleratorHandlerId = acceleratorHandlerId;
-        this._mediaKeysSettingsHandlerId = mediaKeysSettingsHandlerId;
-        this._mediaKeysSettingsHandlerId = this._settings?.connect('changed::enable-media-keys', () => {
-            this._cleanupMediaKeys();
-            this._setupMediaKeys();
-        });
-    }
-
-    _cleanupMediaKeys() {
-        const { mediaKeyAccelerators, acceleratorHandlerId, mediaKeysSettingsHandlerId } = cleanupMediaKeys(this._mediaKeyAccelerators, this._acceleratorHandlerId, this._mediaKeysSettingsHandlerId, this._settings);
-        this._mediaKeyAccelerators = mediaKeyAccelerators;
-        this._acceleratorHandlerId = acceleratorHandlerId;
-        this._mediaKeysSettingsHandlerId = mediaKeysSettingsHandlerId;
-    }
-
     disable() {
         if (this._monitor) {
             if (this._monitorHandlerId) {
@@ -257,7 +299,15 @@ export default class YetAnotherRadioExtension extends Extension {
             this._monitor = null;
         }
 
-        this._cleanupMediaKeys();
+        if (this._mprisSettingId) {
+            this._settings.disconnect(this._mprisSettingId);
+            this._mprisSettingId = 0;
+        }
+
+        if (this._mpris) {
+            this._mpris.destroy();
+            this._mpris = null;
+        }
 
         this._indicator?.destroy();
         this._indicator = null;
