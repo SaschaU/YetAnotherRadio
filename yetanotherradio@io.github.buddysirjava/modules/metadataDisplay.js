@@ -78,11 +78,13 @@ function _copyToClipboard(text) {
     if (!value)
         return;
 
+    const preview = value.length > 80 ? `${value.slice(0, 77)}...` : value;
     try {
-        const preview = value.length > 80 ? `${value.slice(0, 77)}...` : value;
-        Main.notify(_('Track info'), GLib.markup_escape_text(preview, -1));
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, value);
+        Main.notify(_('Copied to clipboard'), GLib.markup_escape_text(preview, -1));
     } catch (e) {
-        console.debug('Failed to copy to clipboard:', e);
+        logError(e, 'Failed to copy to clipboard');
+        Main.notify(_('Track info'), GLib.markup_escape_text(preview, -1));
     }
 }
 

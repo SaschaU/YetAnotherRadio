@@ -367,6 +367,7 @@ export default class YetAnotherRadioExtension extends Extension {
     }
 
     disable() {
+	// unlock-dialog is used for radio be able to continue playing while the screen is locked.
         if (this._monitor) {
             if (this._monitorHandlerId) {
                 this._monitor.disconnect(this._monitorHandlerId);
