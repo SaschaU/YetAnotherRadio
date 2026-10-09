@@ -12,7 +12,11 @@ export function createStationMenuItem(station, playStationCallback, isNowPlaying
 
     const item = new PopupMenu.PopupBaseMenuItem({
         reactive: true,
-        can_focus: true,
+        can_focus: true,This branch has conflicts that must be resolved
+
+Discard 3 commits to make this branch match the upstream repository. 3 commits will be removed from this branch.
+
+You can resolve merge conflicts using the command line and a text editor.
     });
 
     item.connect('activate', () => {
@@ -20,7 +24,7 @@ export function createStationMenuItem(station, playStationCallback, isNowPlaying
     });
 
     const box = new St.BoxLayout({
-        vertical: false,
+        orientation: Clutter.Orientation.HORIZONTAL,
         x_expand: true,
         y_align: Clutter.ActorAlign.CENTER,
         style_class: 'yetanotherradio-station-row',
